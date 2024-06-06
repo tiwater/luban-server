@@ -50,6 +50,7 @@ else:  # assuming linux
 
 
 SNAPSHOT_REFRESH = 1  # make a performance measurement every second
+docker_compose_cmd = 'docker compose'
 network_sent = 0
 network_received = 0
 
@@ -128,6 +129,7 @@ class Client:
         """Create an instance of client."""
         self.websocket = websocket
         self.streaming_server_port = 0
+        self.rocs_server_port = 0
         self.webots_process = None
         self.on_webots_quit = None
         self.project_instance_path = ''
@@ -146,13 +148,16 @@ class Client:
     def setup_project(self):
         global config
         global current_load
-        self.project_instance_path = config['instancesPath'] + str(id(self))
+        self.project_instance_path = os.path.join(config['instancesPath'], str(id(self)))
+
         if not hasattr(self, 'url'):
             logging.error('Missing URL.')
             return False
+        
         if not self.url.startswith('https://github.com/'):
             logging.error(f'Unsupported URL protocol: {self.url}')
             return False
+        
         if 'allowedRepositories' not in config or not self.url.startswith(tuple(config['allowedRepositories'])):
             if not config['docker']:
                 error = 'Docker not enabled: cannot host simulations from repositories outside of "allowedRepositories".'
@@ -169,7 +174,51 @@ class Client:
                 self.websocket.write_message(f'loading: Error: {error}')
                 logging.error(error)
                 return False
-        return self.setup_project_from_github()
+
+        parts = self.url[19:].split('/')
+        username = parts[0]
+        repository_name = parts[1]
+        
+        # Construct the cache path from the username and repository name.
+        cache_path = os.path.join(config['projectCacheDir'], username, repository_name)
+
+        # Check if the cache path exists.
+        if not os.path.exists(cache_path):
+            # If not, clone the repository from GitHub.
+            if not self.setup_project_from_github():
+                return False
+            # Copy the cloned project to the cache directory.
+            try:
+                # Remove old cache if any
+                if os.path.exists(cache_path):
+                    shutil.rmtree(cache_path)
+                
+                # Create the necessary directories for the cache path
+                os.makedirs(os.path.join(config['projectCacheDir'], username), exist_ok=True)
+                
+                # Copy the project folder
+                shutil.copytree(os.path.join(self.project_instance_path, repository_name), cache_path)
+                logging.info(f'Project {repository_name} cached at {cache_path}')
+            except Exception as e:
+                logging.error(f'Error copying project to cache: {e}')
+                return False
+        else:
+            try:
+                self.world = parts[len(parts) - 1]
+                # Copy the cached project to the project instance path.
+                if os.path.exists(self.project_instance_path):
+                    shutil.rmtree(self.project_instance_path)
+                shutil.copytree(cache_path, self.project_instance_path)
+                logging.info(f'Project {repository_name} copied from cache to {self.project_instance_path}')
+                # Set the project path to the project instance path.
+                os.chdir(self.project_instance_path)
+                self.project_instance_path = os.path.join(self.project_instance_path, *parts[4:-2])
+            except Exception as e:
+                logging.error(f'Error copying project from cache: {e}')
+                return False
+        
+
+        return True
 
     def setup_project_from_github(self):
         parts = self.url[19:].split('/')
@@ -181,7 +230,7 @@ class Client:
             username = parts[0]
             repository = parts[1]
             if parts[2] != 'blob' and parts[2] != 'tree':
-                error = f'Missing blob in Webots simulation URL, founds {parts[2]}'
+                error = f'Missing blob in Webots simulation URL, found: {parts[2]}'
             else:
                 version = parts[3]  # tag or branch name
                 folder = '/'.join(parts[4:length - 2])
@@ -228,6 +277,7 @@ class Client:
                 logging.error(output[1:].strip('\n'))
             else:  # stdout
                 logging.info(output[1:].strip('\n'))
+
         self.project_instance_path += f'/{repository}'
         if folder:
             self.project_instance_path += f'/{folder}'
@@ -247,6 +297,8 @@ class Client:
 
         def runWebotsInThread(client):
             global config
+            global docker_compose_cmd
+
             world = f'{self.project_instance_path}/worlds/{self.world}'
             port = client.streaming_server_port
             asyncio.set_event_loop(asyncio.new_event_loop())
@@ -279,6 +331,7 @@ class Client:
                     "PROJECT_PATH": config["projectsDir"],
                     "MAKE": makeProject,
                     "PORT": port,
+                    "ROCS_PORT": client.rocs_server_port,
                     "COMPOSE_PROJECT_NAME": str(id(self)),
                     "WEBOTS": webotsCommand
                 }
@@ -355,7 +408,7 @@ class Client:
                     for key, value in envVarDocker.items():
                         env_file.write(f'{key}={value}\n')
 
-                command = f'docker compose -f {self.project_instance_path}/docker-compose.yml up --build --no-color'
+                command = f'{docker_compose_cmd} -f {self.project_instance_path}/docker-compose.yml up --build --no-color'
             else:
                 webotsCommand += world
                 command = webotsCommand
@@ -432,9 +485,10 @@ class Client:
 
     def kill_webots(self):
         """Force the termination of Webots or relative Docker service(s)."""
+        global docker_compose_cmd
         if config['docker']:
             if os.path.exists(f"{self.project_instance_path}/docker-compose.yml"):
-                os.system(f"docker compose -f {self.project_instance_path}/docker-compose.yml down "
+                os.system(f"{docker_compose_cmd} -f {self.project_instance_path}/docker-compose.yml down "
                           "-v --timeout 0")
 
             if self.webots_process:
@@ -461,14 +515,15 @@ class Client:
 
                 for image in images:
                     repository = image['Repository']
-                    tag = image['Tag']
-                    created_at = image['CreatedAt']
-                    created_at = time.mktime(time.strptime(created_at, '%Y-%m-%d %H:%M:%S %z %Z'))
-                    # Check if image is not in use by any running containers and if it was created more than 24 hours ago
-                    output = subprocess.check_output(['docker', 'ps', '-q', '-f', f'ancestor={repository}:{tag}'])
-                    if (output == b'' and (current_time - created_at) > 2 * 24 * 60 * 60
-                            and f'{repository}:{tag}' not in config['persistantDockerImages']):
-                        subprocess.call(['docker', 'rmi', f'{repository}:{tag}'])
+                    if "webots" in repository:
+                      tag = image['Tag']
+                      created_at = image['CreatedAt']
+                      created_at = time.mktime(time.strptime(created_at, '%Y-%m-%d %H:%M:%S %z %Z'))
+                      # Check if image is not in use by any running containers and if it was created more than 24 hours ago
+                      output = subprocess.check_output(['docker', 'ps', '-q', '-f', f'ancestor={repository}:{tag}'])
+                      if (output == b'' and (current_time - created_at) > 1 * 24 * 60 * 60
+                              and f'{repository}:{tag}' not in config['persistantDockerImages']):
+                          subprocess.call(['docker', 'rmi', f'{repository}:{tag}'])
             os.system("docker system prune --volumes -f")
         else:
             if self.webots_process:
@@ -512,7 +567,7 @@ class ClientWebSocketHandler(tornado.websocket.WebSocketHandler):
                 return 0
             found = False
             for client in self.clients:
-                if port == client.streaming_server_port:
+                if port == client.streaming_server_port or port == client.rocs_server_port:
                     found = True
                     break
             if found:
@@ -573,6 +628,7 @@ class ClientWebSocketHandler(tornado.websocket.WebSocketHandler):
                              f'streaming_server_port: {client.streaming_server_port})')
             elif 'start' in data:  # checkout a github folder and run a simulation in there
                 client.streaming_server_port = ClientWebSocketHandler.next_available_port()
+                client.rocs_server_port = ClientWebSocketHandler.next_available_port()
                 client.url = data['start']['url']
                 if 'mode' in data['start']:
                     client.mode = data['start']['mode']
@@ -852,6 +908,7 @@ def main():
     # logDir:              directory where the log files are written
     # monitorLogEnabled:   store monitor data in a file (true by default)
     # debug:               output debug information to stdout (false by default)
+    # projectCacheDir:     directory in which projects are cached
     #
     global config
     global snapshots
@@ -899,6 +956,8 @@ def main():
     if 'timeout' not in config or config['timeout'] < 360:
         config['timeout'] = 7200
 
+    if 'projectCacheDir' not in config or config['projectCacheDir'] == '':
+        config['projectCacheDir'] = os.getcwd() + '/projectsCache'
     config['instancesPath'] = tempfile.gettempdir().replace('\\', '/') + '/webots/instances/'
     # create the instances path
     if os.path.exists(config['instancesPath']):
