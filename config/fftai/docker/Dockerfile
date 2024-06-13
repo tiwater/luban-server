@@ -61,6 +61,9 @@ RUN update-rc.d rocs-svr defaults
 
 EXPOSE 5005 8001 51888
 
+# Overwrite the generic.js
+COPY plugins/generic.js /usr/local/webots/resources/projects/plugins/robot_windows/generic/generic.js
+
 # Use a script to start the services
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 CMD ["/bin/bash", "/usr/local/bin/entrypoint.sh"]

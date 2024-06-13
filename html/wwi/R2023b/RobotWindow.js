@@ -63,7 +63,8 @@ export default class RobotWindow {
           this.receive(message, robot);
         }
       } else if (!ignoreData) {
-        console.log('WebSocket error: Unknown message received: "' + data + '"');
+        // Too noisy
+        // console.log('WebSocket error: Unknown message received: "' + data + '"');
       }
     }
   }
