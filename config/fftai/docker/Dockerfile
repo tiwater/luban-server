@@ -45,6 +45,12 @@ RUN dpkg -i /home/fftai/rocs-webots.deb \
 
 WORKDIR /
 
+RUN apt-get update && apt-get install --fix-broken -y \
+    && apt-get install -y --no-install-recommends \
+      gcc-11 \
+      g++-11 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY rocs-svr /etc/init.d/rocs-svr
 
 RUN chmod 755 /etc/init.d/rocs-svr
