@@ -28,6 +28,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       window.addEventListener('message', messageListener);
 
+      console.log = ()=>{};
+
       window.parent.postMessage({
         simulation: 'ready',
         host,
