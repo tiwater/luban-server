@@ -26,11 +26,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         port = pathSegments[pathSegments.length - 1]; // Gets the last segment which should be the port
       }
 
-      console.info = ()=>{}
-      console.log = ()=>{}
-      console.warn = ()=>{}
-      console.error = ()=>{}
-
       window.addEventListener('message', messageListener);
 
       window.parent.postMessage({
