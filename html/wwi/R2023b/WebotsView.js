@@ -59,7 +59,7 @@ export default class WebotsView extends HTMLElement {
 
         // if it's a data file, use a custom dir
         if (path.endsWith('.data'))
-          return 'https:/cyberbotics.com/wwi/R2023b/' + path;
+          return 'https://cyberbotics.com/wwi/R2023b/' + path;
 
         // otherwise, use the default, the prefix (JS file's dir) + the path
         return prefix + path;
