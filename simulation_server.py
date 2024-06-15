@@ -54,6 +54,8 @@ docker_compose_cmd = 'docker compose'
 network_sent = 0
 network_received = 0
 
+ROCS_PORT_POLICY = 1  # 0: webots port + 1; 1: in port table
+rocs_ports = [25689, 39240, 48626]
 
 def expand_path(path):
     """Expand user and environmental variables in a string."""
@@ -456,6 +458,7 @@ class Client:
                     logging.info('Webots world is loaded, ready to receive connections')
                     break
             hostname = config['server']
+            client.websocket.write_message(f'rocs:{hostname}:{client.rocs_server_port}')
             protocol = 'wss:' if config['ssl'] else 'ws:'
             separator = '/' if config['portRewrite'] else ':'
             message = f'webots:{protocol}//{hostname}{separator}{port}'
@@ -624,6 +627,7 @@ class ClientWebSocketHandler(tornado.websocket.WebSocketHandler):
 
     def on_message(self, message):
         """Receive message from client."""
+        global rocs_ports
         client = ClientWebSocketHandler.find_client_from_websocket(self)
         if client:
             data = json.loads(message)
@@ -637,7 +641,19 @@ class ClientWebSocketHandler(tornado.websocket.WebSocketHandler):
                              f'streaming_server_port: {client.streaming_server_port})')
             elif 'start' in data:  # checkout a github folder and run a simulation in there
                 client.streaming_server_port = ClientWebSocketHandler.next_available_port()
-                client.rocs_server_port = client.streaming_server_port + 1
+                if ROCS_PORT_POLICY == 0:
+                    client.rocs_server_port = client.streaming_server_port + 1
+                else:
+                    startPort = config['port'] + 1
+                    index = int((client.streaming_server_port - startPort) / 2)
+                    # Check if the index is within the range of available rocs_ports
+                    if 0 <= index < len(rocs_ports):
+                        client.rocs_server_port = rocs_ports[index]
+                    else:
+                        # Handle the situation where the index exceeds the range of predefined ports.
+                        # This could be either raising an exception or assigning a default port
+                        logging.error("Index out of range for predefined ROCS ports")
+                        raise IndexError("Index out of range for predefined ROCS ports")
                 client.url = data['start']['url']
                 if 'mode' in data['start']:
                     client.mode = data['start']['mode']

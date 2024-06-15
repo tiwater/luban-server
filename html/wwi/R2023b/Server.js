@@ -104,6 +104,10 @@ export default class Server {
       WbCadShape.stream = true;
       this.#view.stream.connect();
     } else if (
+      message.indexOf('rocs:') === 0
+    ) {
+      this.#view.rocsServer = message.substring(5);
+    } else if (
       message.indexOf('controller:') === 0 ||
       message.indexOf('reset controller:') === 0
     ) {
