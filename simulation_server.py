@@ -54,7 +54,7 @@ docker_compose_cmd = 'docker compose'
 network_sent = 0
 network_received = 0
 
-ROCS_PORT_POLICY = 1  # 0: webots port + 1; 1: in port table
+ROCS_PORT_POLICY = 0  # 0: webots port + 1; 1: in port table
 rocs_ports = [25689, 39240, 48626]
 
 def expand_path(path):
