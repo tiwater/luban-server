@@ -1056,6 +1056,7 @@ def main():
     for server in config['notify']:
         allowedRepositories = ','.join(config['allowedRepositories']) if 'allowedRepositories' in config else ''
         retry = 6  # try once and retries 5 times if needed
+        x = None
         while retry > 0:
             error = False
             try:
@@ -1081,7 +1082,8 @@ def main():
                     time.sleep(5)
                 else:
                     retry = 0
-        logging.info(x.text)
+        if x:
+            logging.info(x.text)
 
     # startup the server
     logging.info(f"Running simulation server on port {config['port']}")
